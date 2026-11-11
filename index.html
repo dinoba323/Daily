@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="bs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dinov radni podsjetnik</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: tri kolone kao listovi na tabli za crtanje — zadaci | pošta | CRM; na telefonu jedna kolona s donjim tabovima */
+:root{
+  --paper:#f3f4f2; --sheet:#ffffff; --ink:#1d2326; --muted:#5f6a70; --line:#d9dddb;
+  --accent:#1f5f8b; --accent-soft:#e3edf4;
+  --urgent:#b3261e; --urgent-soft:#fbe9e7; --warn:#9a5b00; --warn-soft:#fdf1dc; --ok:#2e6b3a; --ok-soft:#e5f2e7;
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#14181a; --sheet:#1c2225; --ink:#e4e8e6; --muted:#9aa5a9; --line:#2f383c;
+  --accent:#7fb6dc; --accent-soft:#1f3442;
+  --urgent:#ff8a80; --urgent-soft:#3a1f1d; --warn:#f0b450; --warn-soft:#3a2d17; --ok:#86c995; --ok-soft:#1d3222;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --paper:#14181a; --sheet:#1c2225; --ink:#e4e8e6; --muted:#9aa5a9; --line:#2f383c;
+  --accent:#7fb6dc; --accent-soft:#1f3442;
+  --urgent:#ff8a80; --urgent-soft:#3a1f1d; --warn:#f0b450; --warn-soft:#3a2d17; --ok:#86c995; --ok-soft:#1d3222;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--paper);color:var(--ink);font:14px/1.45 var(--f-body);display:flex;flex-direction:column}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+header.top{display:flex;align-items:center;gap:16px;padding:10px 20px;border-bottom:1px solid var(--line);background:var(--sheet)}
+header.top h1{font:600 18px/1.2 var(--f-display);margin:0;letter-spacing:.01em}
+header.top .date{font:400 12px var(--f-mono);color:var(--muted)}
+header.top .spacer{flex:1}
+.status-dot{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.status-dot i{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+.status-dot.live i{background:var(--ok)} .status-dot.err i{background:var(--urgent)}
+main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,1.15fr) minmax(320px,1.25fr);gap:0}
+.col{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+.col:last-child{border-right:0}
+.col-head{padding:14px 18px 10px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line);background:var(--sheet)}
+.col-head h2{font:600 15px/1.2 var(--f-display);text-transform:uppercase;letter-spacing:.08em;margin:0}
+.col-head .meta{font-size:12px;color:var(--muted)}
+.col-head .actions{margin-left:auto;display:flex;gap:6px}
+.col-body{flex:1;overflow-y:auto;padding:12px 14px 40px;display:flex;flex-direction:column;gap:14px}
+.btn{border:1px solid var(--line);background:var(--sheet);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:13px;white-space:nowrap}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--sheet)}
+.btn.primary:hover{filter:brightness(1.08);color:var(--sheet)}
+.btn.small{padding:2px 8px;font-size:12px}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn[disabled]{opacity:.5;cursor:default}
+.group-title{font:600 12px var(--f-display);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);display:flex;align-items:center;gap:8px;margin:2px 2px 6px}
+.group-title .n{font-family:var(--f-mono);font-weight:400}
+.group-title.urgent{color:var(--urgent)} .group-title.warn{color:var(--warn)}
+.list{display:flex;flex-direction:column;gap:6px}
+.card{background:var(--sheet);border:1px solid var(--line);border-radius:8px;padding:9px 11px;position:relative}
+.card.stripe-urgent{border-left:4px solid var(--urgent)} .card.stripe-warn{border-left:4px solid var(--warn)} .card.stripe-accent{border-left:4px solid var(--accent)} .card.stripe-muted{border-left:4px solid var(--line)}
+.card.flash{box-shadow:0 0 0 2px var(--accent)}
+.row{display:flex;gap:8px;align-items:flex-start}
+.grow{flex:1;min-width:0}
+.title{font-weight:500;overflow-wrap:anywhere}
+.sub{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.chip{font-size:11.5px;border-radius:999px;padding:1px 8px;background:var(--accent-soft);color:var(--accent);border:0;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip.urgent{background:var(--urgent-soft);color:var(--urgent)} .chip.warn{background:var(--warn-soft);color:var(--warn)} .chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.plain{background:transparent;border:1px solid var(--line);color:var(--muted);cursor:default}
+.check{width:20px;height:20px;border:1.5px solid var(--muted);border-radius:5px;background:transparent;cursor:pointer;flex:none;margin-top:1px;display:grid;place-items:center;padding:0}
+.check.on{background:var(--ok);border-color:var(--ok);color:var(--sheet)}
+.done .title{text-decoration:line-through;color:var(--muted)}
+.addform{display:grid;grid-template-columns:1fr auto auto;gap:6px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--sheet)}
+.addform input[type=text]{grid-column:1/-1}
+input[type=text],input[type=date],input[type=search],select,textarea{border:1px solid var(--line);background:var(--paper);border-radius:6px;padding:6px 8px;width:100%;min-width:0}
+textarea{resize:vertical;min-height:60px}
+.card-actions{display:flex;gap:4px;flex-wrap:wrap;margin-top:7px}
+.note{font-size:12.5px;color:var(--muted);padding:10px 12px;border:1px dashed var(--line);border-radius:8px;background:var(--sheet)}
+.note.err{border-color:var(--urgent);color:var(--urgent)}
+.note b{color:var(--ink)}
+.tabs{display:flex;gap:2px;padding:8px 14px 0;background:var(--sheet);border-bottom:1px solid var(--line)}
+.tab{border:0;background:transparent;padding:7px 12px;border-bottom:2px solid transparent;cursor:pointer;font-weight:500;color:var(--muted)}
+.tab.on{color:var(--ink);border-bottom-color:var(--accent)}
+.tab .mono{font-size:11px;margin-left:4px}
+.toolbar{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--sheet);flex-wrap:wrap}
+.toolbar input{flex:1;min-width:140px}
+.toolbar select{width:auto}
+.lead-meta{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted);margin-top:3px}
+details.fold>summary{cursor:pointer;list-style:none}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary .group-title::before{content:"▸";font-size:10px}
+details.fold[open]>summary .group-title::before{content:"▾"}
+/* modal */
+.modal-back{position:fixed;inset:0;background:rgba(10,14,16,.45);display:none;align-items:flex-start;justify-content:center;padding:4vh 16px;z-index:20;overflow-y:auto}
+.modal-back.on{display:flex}
+.modal{background:var(--sheet);border-radius:10px;border:1px solid var(--line);width:100%;max-width:640px;box-shadow:0 20px 50px rgba(0,0,0,.25);display:flex;flex-direction:column}
+.modal header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center}
+.modal header h3{margin:0;font:600 17px var(--f-display);flex:1;text-wrap:balance}
+.modal .body{padding:14px 18px;display:flex;flex-direction:column;gap:14px}
+.modal footer{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.fs{border:0;padding:0;margin:0;display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
+.fs legend{font:600 12px var(--f-display);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;padding:0}
+.fs label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+.fs label.wide{grid-column:1/-1}
+.fs label span{font-weight:500}
+.linkish{color:var(--accent);text-decoration:none}
+.linkish:hover{text-decoration:underline}
+.toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:8px 14px;border-radius:8px;font-size:13px;z-index:30;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:1}
+nav.mobile{display:none}
+@media (max-width:900px){
+  main{grid-template-columns:1fr}
+  .col{display:none;border-right:0}
+  .col.on{display:flex}
+  nav.mobile{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);background:var(--sheet);padding-bottom:env(safe-area-inset-bottom)}
+  nav.mobile button{border:0;background:transparent;padding:10px 4px 12px;font:500 13px var(--f-body);color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:2px}
+  nav.mobile button.on{color:var(--accent)}
+  nav.mobile .badge{font:500 11px var(--f-mono);background:var(--urgent);color:var(--sheet);border-radius:999px;padding:0 6px;min-width:18px}
+  nav.mobile .badge:empty{display:none}
+  header.top{padding:10px 16px}
+  .fs{grid-template-columns:1fr}
+  .modal-back{padding:0}
+  .modal{border-radius:0;min-height:100%;max-width:none}
+  .toast{bottom:84px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Radni podsjetnik</h1>
+  <span class="date mono" id="today"></span>
+  <span class="spacer"></span>
+  <span class="status-dot" id="syncStatus"><i></i><span>Povezivanje…</span></span>
+</header>
+
+<main>
+  <!-- LIJEVO: ZADACI -->
+  <section class="col on" id="col-todo" aria-label="Zadaci">
+    <div class="col-head"><h2>Zadaci</h2><span class="meta" id="todoMeta"></span></div>
+    <form class="addform" id="addTask" autocomplete="off">
+      <input type="text" id="newTaskTitle" placeholder="Novi zadatak… (Enter za dodavanje)" aria-label="Novi zadatak">
+      <input type="date" id="newTaskDue" aria-label="Rok">
+      <select id="newTaskPrio" aria-label="Prioritet"><option value="srednji">Srednji</option><option value="visok">Visok</option><option value="nizak">Nizak</option></select>
+      <button class="btn primary" type="submit">Dodaj</button>
+    </form>
+    <div class="col-body" id="todoBody"><div class="note">Učitavam zadatke…</div></div>
+  </section>
+
+  <!-- SREDINA: POŠTA -->
+  <section class="col" id="col-mail" aria-label="Izvještaj iz pošte">
+    <div class="col-head"><h2>Pošta</h2><span class="meta" id="mailMeta"></span>
+      <div class="actions"><button class="btn small" id="mailRefresh" type="button">Osvježi</button><button class="btn small" id="mailReclass" type="button" title="Claude ponovo procjenjuje šta je hitno">Analiziraj</button></div>
+    </div>
+    <div class="col-body" id="mailBody"><div class="note">Učitavam poštu iz Outlooka…</div></div>
+  </section>
+
+  <!-- DESNO: CRM -->
+  <section class="col" id="col-crm" aria-label="CRM tržišni tragovi">
+    <div class="col-head"><h2>CRM · Tragovi</h2><span class="meta" id="crmMeta"></span>
+      <div class="actions"><button class="btn small" id="crmExport" type="button">Izvezi .xlsx</button><button class="btn small primary" id="crmNew" type="button">＋ Novi trag</button></div>
+    </div>
+    <div class="tabs" id="crmTabs" role="tablist"></div>
+    <div class="toolbar">
+      <input type="search" id="crmSearch" placeholder="Traži investitora, lokaciju, kontakt…" aria-label="Pretraga tragova">
+      <select id="crmPrio" aria-label="Filter prioriteta"><option value="">Svi prioriteti</option><option>Visok</option><option>Srednji</option><option>Nizak</option></select>
+    </div>
+    <div class="col-body" id="crmBody"><div class="note">Učitavam tragove…</div></div>
+  </section>
+</main>
+
+<nav class="mobile" id="mnav">
+  <button type="button" data-col="todo" class="on">Zadaci <span class="badge" id="bTodo"></span></button>
+  <button type="button" data-col="mail">Pošta <span class="badge" id="bMail"></span></button>
+  <button type="button" data-col="crm">CRM <span class="badge" id="bCrm"></span></button>
+</nav>
+
+<div class="modal-back" id="modalBack" role="dialog" aria-modal="true"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+"use strict";
+/* ---------- konstante ---------- */
+const MAIL_SERVER = "Microsoft 365", MAIL_TOOL = "outlook_email_search";
+const ME = "dino@baupartner.ba";
+const LISTS = ["Tragovi","Aktuelno","Staro"];
+const BASE_COLS = ["ID","Datum unosa","Investitor","Djelatnost investitora","Lokacija (grad/općina)","Tip objekta","Poznate informacije o projektu","Vrijednost investicije","Status izgradnje","Projektant","Izvođač","Kontakt osoba","Email","Telefon","Komentar nakon kontakta","Datum ponovnog kontakta","Prioritet","Sljedeći korak","Izvori informacija","Napomena","Web stranica","Adresa sjedišta","Vlasnici","Direktor"];
+const EXTRA_COLS = {Tragovi:[], Aktuelno:["Datum prebacivanja","Datum ponude","Broj ponude","Vrijednost ponude (KM)","Status ponude"], Staro:["Datum prebacivanja","Razlog (zašto nije aktuelno)"]};
+const STATUS_IZG = ["Najava/ideja","Kupovina zemljišta","Priprema dokumentacije","Projektovanje","Dozvole u postupku","Tender za izvođača","U izgradnji","Završeno","Otkazano/zastoj"];
+const PRIO = ["Visok","Srednji","Nizak"];
+const STATUS_PONUDE = ["U pripremi","Poslana","Pregovori","Prihvaćena","Odbijena"];
+const DATE_COLS = new Set(["Datum unosa","Datum ponovnog kontakta","Datum prebacivanja","Datum ponude"]);
+const LONG_COLS = new Set(["Poznate informacije o projektu","Komentar nakon kontakta","Izvori informacija","Napomena","Sljedeći korak","Djelatnost investitora"]);
+const LEAD_GROUPS = [
+  ["Osnovno",["Investitor","Djelatnost investitora","Lokacija (grad/općina)","Tip objekta","Vrijednost investicije","Status izgradnje","Prioritet","Datum unosa"]],
+  ["Kontakt i praćenje",["Kontakt osoba","Email","Telefon","Datum ponovnog kontakta","Sljedeći korak","Komentar nakon kontakta"]],
+  ["Projekat",["Poznate informacije o projektu","Projektant","Izvođač"]],
+  ["Podaci o firmi",["Web stranica","Adresa sjedišta","Vlasnici","Direktor"]],
+  ["Izvori",["Izvori informacija","Napomena"]],
+];
+
+/* ---------- stanje ---------- */
+const S = {
+  db:null, mcp:null, sample:null, downloads:null, canWrite:true,
+  tasks:[], tasksReady:false, leads:[], leadsReady:false, triage:{}, triageReady:false, sync:null,
+  emails:[], mailState:"loading", mailErr:null, mailStoredAt:null, classifying:false, autoClassDone:false,
+  crmList:"Tragovi", crmQuery:"", crmPrio:"", flashId:null,
+};
+
+/* ---------- pomoćne ---------- */
+const $ = (id)=>document.getElementById(id);
+const esc = (s)=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pad = (n)=>String(n).padStart(2,"0");
+const iso = (d)=>d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+const todayIso = ()=>iso(new Date());
+const addDays = (n)=>{const d=new Date();d.setDate(d.getDate()+n);return iso(d);};
+const DAYS=["ned","pon","uto","sri","čet","pet","sub"];
+function fmtDate(s){ if(!s) return ""; const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s); if(!m) return String(s); const t=todayIso(); if(s.slice(0,10)===t) return "danas"; if(s.slice(0,10)===addDays(1)) return "sutra"; if(s.slice(0,10)===addDays(-1)) return "jučer"; return m[3]+"."+m[2]+"."+(m[1]===String(new Date().getFullYear())?"":m[1]+"."); }
+function fmtTime(isoStr){ if(!isoStr) return ""; const d=new Date(isoStr); if(isNaN(d)) return ""; const same=iso(d)===todayIso(); return same? pad(d.getHours())+":"+pad(d.getMinutes()) : DAYS[d.getDay()]+" "+pad(d.getDate())+"."+pad(d.getMonth()+1)+"."; }
+function ago(ts){ const s=Math.round((Date.now()-ts)/1000); if(s<60) return "upravo"; const m=Math.round(s/60); if(m<60) return "prije "+m+" min"; const h=Math.round(m/60); if(h<24) return "prije "+h+" h"; return "prije "+Math.round(h/24)+" d"; }
+function hashKey(str){ let a=0x811c9dc5,b=0x01000193^0x5bd1e995; for(let i=0;i<str.length;i++){const c=str.charCodeAt(i); a^=c; a=Math.imul(a,0x01000193); b^=c; b=Math.imul(b,0x5bd1e995)^(b>>>13);} return "m"+(a>>>0).toString(36)+(b>>>0).toString(36); }
+function uid(p){ return p+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+let toastT; function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("on"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("on"),2600); }
+function domainOf(s){ if(!s) return ""; const m=String(s).toLowerCase().match(/@([a-z0-9.-]+\.[a-z]{2,})/); if(m) return m[1]; const w=String(s).toLowerCase().replace(/^https?:\/\//,"").replace(/^www\./,"").split(/[\/\s]/)[0]; return /\./.test(w)?w:""; }
+const GENERIC_DOMAINS=new Set(["gmail.com","hotmail.com","yahoo.com","outlook.com","bih.net.ba","live.com","icloud.com"]);
+
+{ const d=new Date(), W=["nedjelja","ponedjeljak","utorak","srijeda","četvrtak","petak","subota"], M=["januar","februar","mart","april","maj","juni","juli","august","septembar","oktobar","novembar","decembar"]; $("today").textContent=W[d.getDay()]+", "+d.getDate()+". "+M[d.getMonth()]+" "+d.getFullYear()+"."; }
+
+/* ---------- mobilna navigacija ---------- */
+$("mnav").addEventListener("click",e=>{ const b=e.target.closest("button[data-col]"); if(!b) return; showCol(b.dataset.col); });
+function showCol(c){ document.querySelectorAll(".col").forEach(x=>x.classList.toggle("on",x.id==="col-"+c)); document.querySelectorAll("#mnav button").forEach(x=>x.classList.toggle("on",x.dataset.col===c)); }
+
+/* ---------- DB ---------- */
+async function writeDoc(path, data, merge){
+  if(!S.db){ toast("Baza nije dostupna u ovom prikazu."); return false; }
+  try{ const ref=S.db.doc(path); if(merge) await ref.update(data); else await ref.set(data); return true; }
+  catch(e){
+    if(e&&e.code==="unavailable"){ await new Promise(r=>setTimeout(r,600+Math.random()*600)); try{ const ref=S.db.doc(path); if(merge) await ref.update(data); else await ref.set(data); return true;}catch(e2){ e=e2; } }
+    if(e&&e.code==="invalid_argument"&&merge){ try{ await S.db.doc(path).set(data); return true; }catch(e3){} }
+    toast(e&&e.code==="quota_exceeded" ? "Baza je puna – obriši stare stavke." : "Spremanje nije uspjelo ("+(e&&e.code||"greška")+").");
+    return false;
+  }
+}
+async function delDoc(path){ if(!S.db) return; try{ await S.db.doc(path).delete(); }catch(e){ toast("Brisanje nije uspjelo."); } }
+
+function subscribe(){
+  const timers={};
+  const watch=(name, q, onData)=>{
+    timers[name]=setTimeout(()=>{ setStatus("err","Baza se ne odaziva – podaci možda nisu svježi"); },10000);
+    q.onSnapshot(snap=>{ if(!snap.metadata.fromCache){ clearTimeout(timers[name]); } onData(snap); updateStatus(); },
+      err=>{ clearTimeout(timers[name]); setStatus("err", err.code==="revoked"?"Pristup bazi prekinut":"Greška baze: "+err.code); });
+  };
+  watch("tasks", S.db.collection("tasks"), snap=>{ S.tasks=snap.docs.map(d=>({id:d.id,...d.data()})); S.tasksReady=true; renderTodo(); renderMail(); });
+  watch("leads", S.db.collection("leads"), snap=>{ S.leads=snap.docs.map(d=>({id:d.id,...d.data()})); S.leadsReady=true; renderCrm(); renderTodo(); renderMail(); });
+  watch("triage", S.db.collection("mailtriage"), snap=>{ const t={}; snap.docs.forEach(d=>t[d.id]=d.data()); S.triage=t; S.triageReady=true; renderMail(); renderTodo(); maybeAutoClassify(); });
+  watch("sync", S.db.doc("meta/sync"), snap=>{ S.sync=snap.exists?snap.data():null; updateStatus(); });
+}
+function setStatus(kind,text){ const el=$("syncStatus"); el.className="status-dot "+(kind||""); el.querySelector("span").textContent=text; }
+function updateStatus(){
+  if(!S.db) return;
+  let t="Sinhronizovano uživo";
+  if(S.sync&&S.sync.lastSync){ const ts=Date.parse(S.sync.lastSync); if(!isNaN(ts)) t+=" · Excel "+ago(ts); }
+  setStatus("live",t);
+}
+
+/* ---------- ZADACI ---------- */
+$("addTask").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const title=$("newTaskTitle").value.trim(); if(!title) return;
+  const id=uid("t"); const now=new Date().toISOString();
+  $("newTaskTitle").value="";
+  await writeDoc("tasks/"+id,{title,due:$("newTaskDue").value||"",priority:$("newTaskPrio").value,done:false,notes:"",source:"ručno",createdAt:now,updatedAt:now});
+  $("newTaskDue").value="";
+});
+function taskEmails(tid){ return Object.entries(S.triage).filter(([k,v])=>v.taskId===tid).map(([k,v])=>({k,...v})); }
+function leadById(id){ return S.leads.find(l=>l.id===id); }
+function prioChip(p){ p=(p||"").toLowerCase(); return p==="visok"?'<span class="chip urgent">visok</span>':p==="nizak"?'<span class="chip plain">nizak</span>':""; }
+function taskCard(t){
+  const today=todayIso(); const late=t.due&&t.due<today&&!t.done;
+  const stripe=t.done?"stripe-muted":late?"stripe-urgent":(t.priority==="visok"?"stripe-warn":"stripe-accent");
+  const ems=taskEmails(t.id); const lead=t.leadId&&leadById(t.leadId);
+  let chips="";
+  if(t.due) chips+=`<span class="chip ${late?"urgent":t.due===today?"warn":"plain"}">${late?"kasni · ":""}${esc(fmtDate(t.due))}</span>`;
+  chips+=prioChip(t.priority);
+  ems.forEach(m=>chips+=`<button class="chip" type="button" data-goto-mail="${esc(m.k)}" title="${esc(m.subject)}">✉ ${esc((m.subject||"").slice(0,38))}</button>`);
+  if(lead) chips+=`<button class="chip ok" type="button" data-open-lead="${esc(lead.id)}">◆ ${esc(String(lead.Investitor||"").slice(0,30))}</button>`;
+  return `<div class="card ${stripe} ${t.done?"done":""} ${S.flashId===t.id?"flash":""}" id="task-${esc(t.id)}">
+    <div class="row"><button class="check ${t.done?"on":""}" type="button" data-toggle="${esc(t.id)}" aria-label="${t.done?"Vrati kao otvoren":"Označi završeno"}">${t.done?"✓":""}</button>
+    <div class="grow"><div class="title">${esc(t.title)}</div>${t.notes?`<div class="sub">${esc(t.notes).slice(0,160)}</div>`:""}${chips?`<div class="chips">${chips}</div>`:""}</div>
+    <button class="btn ghost small" type="button" data-edit-task="${esc(t.id)}" aria-label="Uredi zadatak">Uredi</button></div></div>`;
+}
+function crmReminders(){
+  const lim=addDays(2); const open=new Set(S.tasks.filter(t=>!t.done&&t.leadId).map(t=>t.leadId));
+  return S.leads.filter(l=>l._list!=="Staro"&&l["Datum ponovnog kontakta"]&&String(l["Datum ponovnog kontakta"]).slice(0,10)<=lim&&!open.has(l.id))
+    .sort((a,b)=>String(a["Datum ponovnog kontakta"]).localeCompare(String(b["Datum ponovnog kontakta"])));
+}
+function renderTodo(){
+  const body=$("todoBody");
+  if(!S.db){ body.innerHTML=`<div class="note err">Baza nije dostupna. Otvori stranicu prijavljen na claude.ai.</div>`; return; }
+  if(!S.tasksReady){ return; }
+  const today=todayIso(), soon=addDays(7);
+  const open=S.tasks.filter(t=>!t.done), done=S.tasks.filter(t=>t.done).sort((a,b)=>String(b.doneAt||"").localeCompare(String(a.doneAt||""))).slice(0,30);
+  const sortFn=(a,b)=>(a.due||"9999").localeCompare(b.due||"9999")||({visok:0,srednji:1,nizak:2}[a.priority]??1)-({visok:0,srednji:1,nizak:2}[b.priority]??1);
+  const g={late:[],today:[],soon:[],later:[],none:[]};
+  open.sort(sortFn).forEach(t=>{ if(!t.due) g.none.push(t); else if(t.due<today) g.late.push(t); else if(t.due===today) g.today.push(t); else if(t.due<=soon) g.soon.push(t); else g.later.push(t); });
+  const sec=(title,arr,cls)=>arr.length?`<div><div class="group-title ${cls||""}">${title} <span class="n">${arr.length}</span></div><div class="list">${arr.map(taskCard).join("")}</div></div>`:"";
+  const rem=crmReminders();
+  let html="";
+  html+=sec("Kasni",g.late,"urgent")+sec("Danas",g.today,"warn");
+  if(rem.length){ html+=`<div><div class="group-title">Podsjetnici iz CRM-a <span class="n">${rem.length}</span></div><div class="list">${rem.map(l=>{const d=String(l["Datum ponovnog kontakta"]).slice(0,10); const late=d<today; return `<div class="card ${late?"stripe-urgent":"stripe-warn"}"><div class="row"><div class="grow"><div class="title">Ponovni kontakt: ${esc(l.Investitor)}</div><div class="sub">${esc(l["Sljedeći korak"]||l["Kontakt osoba"]||"")}</div><div class="chips"><span class="chip ${late?"urgent":"warn"}">${esc(fmtDate(d))}</span>${l.Telefon?`<span class="chip plain">${esc(String(l.Telefon).slice(0,40))}</span>`:""}</div></div></div><div class="card-actions"><button class="btn small" type="button" data-lead-task="${esc(l.id)}">→ U zadatke</button><button class="btn small ghost" type="button" data-open-lead="${esc(l.id)}">Otvori trag</button></div></div>`;}).join("")}</div></div>`; }
+  html+=sec("Narednih 7 dana",g.soon)+sec("Kasnije",g.later)+sec("Bez roka",g.none);
+  if(!open.length&&!rem.length) html+=`<div class="note">Nema otvorenih zadataka. Dodaj prvi iznad ili napravi zadatak iz emaila u srednjoj koloni.</div>`;
+  if(done.length) html+=`<details class="fold"><summary><div class="group-title">Završeno <span class="n">${done.length}</span></div></summary><div class="list">${done.map(taskCard).join("")}</div></details>`;
+  body.innerHTML=html;
+  const lateN=g.late.length+g.today.length;
+  $("todoMeta").textContent=open.length+" otvoreno"+(lateN?" · "+lateN+" za danas/kasni":"");
+  $("bTodo").textContent=lateN||"";
+}
+document.addEventListener("click",async e=>{
+  const t=e.target.closest("[data-toggle],[data-edit-task],[data-goto-mail],[data-open-lead],[data-lead-task],[data-goto-task]"); if(!t) return;
+  if(t.dataset.toggle){ const task=S.tasks.find(x=>x.id===t.dataset.toggle); if(!task) return; const done=!task.done; await writeDoc("tasks/"+task.id,{done,doneAt:done?new Date().toISOString():"",updatedAt:new Date().toISOString()},true); if(done) toast("Zadatak završen ✓"); }
+  else if(t.dataset.editTask) openTaskModal(S.tasks.find(x=>x.id===t.dataset.editTask));
+  else if(t.dataset.gotoMail){ showCol("mail"); const el=document.getElementById("mail-"+t.dataset.gotoMail); if(el){ el.scrollIntoView({block:"center",behavior:"smooth"}); el.classList.add("flash"); setTimeout(()=>el.classList.remove("flash"),1800);} else toast("Email više nije među 25 najnovijih."); }
+  else if(t.dataset.gotoTask){ showCol("todo"); const el=document.getElementById("task-"+t.dataset.gotoTask); if(el){ el.scrollIntoView({block:"center",behavior:"smooth"}); el.classList.add("flash"); setTimeout(()=>el.classList.remove("flash"),1800);} }
+  else if(t.dataset.openLead) openLeadModal(leadById(t.dataset.openLead));
+  else if(t.dataset.leadTask){ const l=leadById(t.dataset.leadTask); if(!l) return; const id=uid("t"), now=new Date().toISOString(); await writeDoc("tasks/"+id,{title:"Kontaktirati: "+l.Investitor,notes:l["Sljedeći korak"]||"",due:String(l["Datum ponovnog kontakta"]||"").slice(0,10),priority:(l.Prioritet||"Srednji").toLowerCase(),done:false,source:"crm",leadId:l.id,createdAt:now,updatedAt:now}); toast("Zadatak napravljen iz CRM-a"); }
+});
+
+/* ---------- MODAL ---------- */
+function openModal(html){ $("modal").innerHTML=html; $("modalBack").classList.add("on"); const f=$("modal").querySelector("input,textarea,select"); if(f&&window.innerWidth>900) f.focus(); }
+function closeModal(){ $("modalBack").classList.remove("on"); $("modal").innerHTML=""; }
+$("modalBack").addEventListener("click",e=>{ if(e.target===$("modalBack")) closeModal(); });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&$("modalBack").classList.contains("on")) closeModal(); });
+
+function openTaskModal(t){
+  if(!t) return;
+  const leadOpts=['<option value="">— bez traga —</option>'].concat(S.leads.filter(l=>l._list!=="Staro").map(l=>`<option value="${esc(l.id)}" ${l.id===t.leadId?"selected":""}>${esc(l.Investitor)}</option>`)).join("");
+  const ems=taskEmails(t.id);
+  openModal(`<header><h3>Uredi zadatak</h3><button class="btn ghost" type="button" id="mClose">Zatvori</button></header>
+  <div class="body"><fieldset class="fs">
+    <label class="wide"><span>Naziv</span><input type="text" id="tTitle" value="${esc(t.title)}"></label>
+    <label><span>Rok</span><input type="date" id="tDue" value="${esc(t.due||"")}"></label>
+    <label><span>Prioritet</span><select id="tPrio">${["visok","srednji","nizak"].map(p=>`<option value="${p}" ${t.priority===p?"selected":""}>${p[0].toUpperCase()+p.slice(1)}</option>`).join("")}</select></label>
+    <label class="wide"><span>Bilješke</span><textarea id="tNotes">${esc(t.notes||"")}</textarea></label>
+    <label class="wide"><span>Povezani trag (CRM)</span><select id="tLead">${leadOpts}</select></label>
+  </fieldset>
+  ${ems.length?`<div><div class="group-title">Povezani emailovi</div><div class="list">${ems.map(m=>`<div class="card"><div class="title">${esc(m.subject)}</div><div class="sub">${esc(m.senderName||m.sender)} · ${esc(fmtTime(m.received))}</div><div class="card-actions">${m.webLink?`<a class="btn small" href="${esc(m.webLink)}" target="_blank" rel="noopener">Otvori u Outlooku</a>`:""}<button class="btn small ghost" type="button" data-unlink="${esc(m.k)}">Ukloni vezu</button></div></div>`).join("")}</div></div>`:""}
+  </div>
+  <footer><button class="btn" type="button" id="tDel" style="margin-right:auto;color:var(--urgent)">Obriši</button><button class="btn" type="button" id="mCancel">Odustani</button><button class="btn primary" type="button" id="tSave">Spremi</button></footer>`);
+  $("mClose").onclick=$("mCancel").onclick=closeModal;
+  $("modal").querySelectorAll("[data-unlink]").forEach(b=>b.onclick=async()=>{ await writeDoc("mailtriage/"+b.dataset.unlink,{taskId:""},true); b.closest(".card").remove(); });
+  let armed=false;
+  $("tDel").onclick=async()=>{ if(!armed){ armed=true; $("tDel").textContent="Klikni ponovo za brisanje"; return; } closeModal(); await delDoc("tasks/"+t.id); toast("Zadatak obrisan"); };
+  $("tSave").onclick=async()=>{ const title=$("tTitle").value.trim()||t.title; const data={title,due:$("tDue").value,priority:$("tPrio").value,notes:$("tNotes").value,leadId:$("tLead").value,updatedAt:new Date().toISOString()}; closeModal(); await writeDoc("tasks/"+t.id,data,true); };
+}
+
+/* ---------- POŠTA ---------- */
+function parseConcat(s){ const out=[]; let depth=0,start=-1,inStr=false,escp=false; for(let i=0;i<s.length;i++){ const c=s[i]; if(inStr){ if(escp) escp=false; else if(c==="\\") escp=true; else if(c==='"') inStr=false; continue; } if(c==='"'){ inStr=true; continue; } if(c==="{"){ if(depth===0) start=i; depth++; } else if(c==="}"){ depth--; if(depth===0&&start>=0){ try{ out.push(JSON.parse(s.slice(start,i+1))); }catch(_){} start=-1; } } } return out; }
+function extractEmails(result){
+  const items=[];
+  const push=(v)=>{ if(v==null) return; if(Array.isArray(v)) return v.forEach(push); if(typeof v==="string") return parseConcat(v).forEach(push);
+    if(typeof v==="object"){ if("subject" in v||"receivedDateTime" in v) items.push(v); else ["messages","value","results","emails","items"].forEach(k=>Array.isArray(v[k])&&push(v[k])); } };
+  if(result&&result.payload!==undefined) push(result.payload);
+  if(!items.length&&result&&Array.isArray(result.content)) result.content.forEach(b=>b&&b.type==="text"&&push(b.text));
+  const seen=new Set(); return items.filter(m=>{ const id=m.id||m.internetMessageId||m.subject+m.receivedDateTime; if(seen.has(id)) return false; seen.add(id); return true; })
+    .filter(m=>(m.sender||"").toLowerCase()!==ME)
+    .map(m=>({...m,k:hashKey(m.internetMessageId||m.id||"")}))
+    .sort((a,b)=>String(b.receivedDateTime).localeCompare(String(a.receivedDateTime)));
+}
+let mailUnsub=null;
+function startMail(){
+  if(!S.mcp){ S.mailState="nomcp"; renderMail(); return; }
+  if(mailUnsub) mailUnsub();
+  mailUnsub=S.mcp.watchTool(MAIL_SERVER,MAIL_TOOL,{order:"newest",limit:25},ev=>{
+    if(ev.type==="data"){ S.emails=extractEmails(ev.result); S.mailState="ok"; S.mailErr=null; S.mailStoredAt=ev.result.cache?ev.result.cache.storedAt:Date.now(); renderMail(); renderTodo(); maybeAutoClassify(); }
+    else { const c=ev.error&&ev.error.code; S.mailErr=ev.error||{code:"upstream_error"}; if(["needs_reauth","server_not_connected","blocked_by_policy","approval_required","not_in_manifest","selection_required","not_granted","capability_disabled"].includes(c)){ S.emails=[]; } S.mailState="err"; renderMail(); }
+  },{refetchInterval:5*60*1000,cache:{staleTime:60*1000,gcTime:24*3600*1000}});
+}
+async function mailAllow(){
+  try{ const r=await S.mcp.callTool(MAIL_SERVER,MAIL_TOOL,{order:"newest",limit:25},{cache:{staleTime:0,gcTime:24*3600*1000,refresh:true}}); S.emails=extractEmails(r); S.mailState="ok"; S.mailErr=null; S.mailStoredAt=Date.now(); renderMail(); maybeAutoClassify(); }
+  catch(e){ S.mailErr=e; S.mailState="err"; renderMail(); }
+}
+$("mailRefresh").onclick=async()=>{ if(!S.mcp) return; $("mailRefresh").disabled=true; try{ await S.mcp.invalidate(MAIL_SERVER,MAIL_TOOL); }catch(_){ } await mailAllow(); $("mailRefresh").disabled=false; };
+$("mailReclass").onclick=()=>classify(S.emails.filter(m=>!(S.triage[m.k]&&S.triage[m.k].handled)), true);
+
+function mailErrNote(e){
+  const c=e&&e.code;
+  if(c==="needs_reauth") return `Veza s Outlookom je istekla. Ponovo poveži <b>Microsoft 365</b> u claude.ai → Settings → Connectors, pa klikni Osvježi.`;
+  if(c==="server_not_connected"||c==="server_not_found") return `Microsoft 365 nije povezan. Dodaj ga u claude.ai → Settings → Connectors.`;
+  if(c==="selection_required") return `Imaš više Microsoft 365 veza – izaberi jednu u ponuđenom prozoru claude.ai.`;
+  if(c==="approval_required") return `Stranica treba tvoju dozvolu za čitanje pošte. <button class="btn small primary" type="button" id="mailAllowBtn">Dozvoli i učitaj</button>`;
+  if(c==="not_in_manifest") return `Pristup pošti je isključen za ovu stranicu. Uključi ga u postavkama stranice na claude.ai.`;
+  if(c==="blocked_by_policy") return `Pristup pošti blokirala je politika organizacije.`;
+  if(c==="server_unavailable"||c==="upstream_error") return `Outlook se trenutno ne odaziva. Prikazujem zadnje učitano – pokušaj Osvježi za minut.`;
+  return `Pošta se ne može učitati (${esc(c||"greška")}).`;
+}
+function heuristic(m){
+  const txt=((m.subject||"")+" "+(m.summary||"")).toLowerCase();
+  const toMe=(m.recipients||[]).map(x=>String(x).toLowerCase()); const direct=toMe[0]===ME||toMe.length===1;
+  if(m.importance==="high"||/\b(hitno|urgent|asap|odmah|danas do|do sutra|rok)\b/.test(txt)) return {kategorija:"hitno",razlog:"Ključne riječi: hitno/rok",akcija:"Pregledaj i odgovori danas"};
+  if(direct&&/\?/.test(m.summary||"")) return {kategorija:"odgovoriti",razlog:"Direktno pitanje tebi",akcija:"Odgovori"};
+  return {kategorija:"info",razlog:"Informativno",akcija:""};
+}
+function guessLead(m){
+  const d=domainOf(m.sender); if(!d||GENERIC_DOMAINS.has(d)) return "";
+  const l=S.leads.find(l=>domainOf(l.Email)===d||domainOf(l["Web stranica"])===d); return l?l.id:"";
+}
+function maybeAutoClassify(){
+  if(S.autoClassDone||S.classifying||S.mailState!=="ok"||!S.triageReady||!S.tasksReady||!S.leadsReady) return;
+  S.autoClassDone=true;
+  const fresh=S.emails.filter(m=>!S.triage[m.k]);
+  if(fresh.length) classify(fresh,false);
+}
+async function classify(list, force){
+  if(!list.length||S.classifying||!S.db) return;
+  S.classifying=true; renderMail();
+  let results={};
+  if(S.sample){
+    const openTasks=S.tasks.filter(t=>!t.done).slice(0,60).map(t=>({id:t.id,naziv:t.title,rok:t.due||""}));
+    const leads=S.leads.filter(l=>l._list!=="Staro").map(l=>({id:l.id,investitor:l.Investitor,email:l.Email||"",kontakt:l["Kontakt osoba"]||""}));
+    const mails=list.map(m=>({k:m.k,od:(m.senderName||"")+" <"+(m.sender||"")+">",primaoci:(m.recipients||[]).slice(0,6),predmet:m.subject,primljeno:m.receivedDateTime,vaznost:m.importance,prilog:!!m.hasAttachments,izvod:String(m.summary||"").replace(/\s+/g," ").slice(0,500)}));
+    const prompt=`Ti si asistent arhitekte Dina Bajramovića (projektant u Baupartner d.o.o., ${ME}). Danas je ${todayIso()}.
+Razvrstaj svaki email u jednu kategoriju:
+- "hitno": traži Dinovu reakciju danas/sutra – rok, problem na gradilištu ili projektu, primjedbe revizije koje blokiraju, direktor ili investitor traži nešto odmah.
+- "odgovoriti": neko očekuje Dinov odgovor, dokument ili odluku, ali nije hitno.
+- "info": obavještenje, potvrda, CC bez traženja akcije, newsletter, automatska poruka, "nema primjedbi".
+Za svaki email: razlog (do 12 riječi, bosanski), akcija (konkretan sljedeći korak do 10 riječi, prazno za info), taskId = id postojećeg otvorenog zadatka koji se jasno odnosi na isti projekat/temu (inače ""), leadId = id CRM traga ako je email od te firme ili o tom investitoru (inače "").
+Otvoreni zadaci: ${JSON.stringify(openTasks)}
+CRM tragovi: ${JSON.stringify(leads)}
+Emailovi: ${JSON.stringify(mails)}
+Vrati SAMO JSON niz: [{"k":"…","kategorija":"hitno|odgovoriti|info","razlog":"…","akcija":"…","taskId":"","leadId":""}]`;
+    try{
+      let val;
+      if(typeof S.sample.json==="function") val=await S.sample.json(prompt,{modelTier:"quick"});
+      else { const r=await S.sample(prompt,{modelTier:"quick"}); const m=r.text.match(/\[[\s\S]*\]/); val=m?JSON.parse(m[0]):[]; }
+      if(val&&!Array.isArray(val)&&Array.isArray(val.emails)) val=val.emails;
+      (Array.isArray(val)?val:[]).forEach(r=>{ if(r&&r.k) results[r.k]={...r,metoda:"claude"}; });
+    }catch(e){ if(e&&e.code==="rate_limited") toast("Claude je zauzet – koristim osnovna pravila."); }
+  }
+  const taskIds=new Set(S.tasks.map(t=>t.id)), leadIds=new Set(S.leads.map(l=>l.id));
+  for(const m of list){
+    const prev=S.triage[m.k]||{};
+    const r=results[m.k]||{...heuristic(m),metoda:"pravila"};
+    if(!force&&prev.kategorija) continue;
+    const data={msgId:m.id||"",subject:m.subject||"",sender:m.sender||"",senderName:m.senderName||"",received:m.receivedDateTime||"",webLink:m.webLink||"",
+      kategorija:["hitno","odgovoriti","info"].includes(r.kategorija)?r.kategorija:"info",razlog:String(r.razlog||"").slice(0,140),akcija:String(r.akcija||"").slice(0,120),metoda:r.metoda,
+      taskId:prev.taskId||(taskIds.has(r.taskId)?r.taskId:""),leadId:prev.leadId||(leadIds.has(r.leadId)?r.leadId:guessLead(m)),handled:!!prev.handled,classifiedAt:new Date().toISOString()};
+    await writeDoc("mailtriage/"+m.k,data);
+  }
+  S.classifying=false; renderMail();
+}
+function mailCard(m){
+  const t=S.triage[m.k]||{}; const cat=t.kategorija;
+  const stripe=t.handled?"stripe-muted":cat==="hitno"?"stripe-urgent":cat==="odgovoriti"?"stripe-warn":"stripe-muted";
+  const task=t.taskId&&S.tasks.find(x=>x.id===t.taskId); const lead=t.leadId&&leadById(t.leadId);
+  let chips="";
+  if(task) chips+=`<button class="chip ${task.done?"ok":""}" type="button" data-goto-task="${esc(task.id)}">☐ ${esc(task.title.slice(0,40))}${task.done?" ✓":""}</button>`;
+  if(lead) chips+=`<button class="chip ok" type="button" data-open-lead="${esc(lead.id)}">◆ ${esc(String(lead.Investitor).slice(0,30))}</button>`;
+  if(m.hasAttachments) chips+=`<span class="chip plain">prilog</span>`;
+  if(!m.isRead) chips+=`<span class="chip warn">nepročitano</span>`;
+  return `<div class="card ${stripe} ${t.handled?"done":""}" id="mail-${esc(m.k)}">
+    <div class="row"><div class="grow"><div class="title">${esc(m.subject||"(bez predmeta)")}</div>
+    <div class="sub">${esc(m.senderName||m.sender)} · <span class="mono">${esc(fmtTime(m.receivedDateTime))}</span></div>
+    ${t.razlog&&cat!=="info"?`<div class="sub" style="color:var(--ink);margin-top:3px">${esc(t.razlog)}${t.akcija?` → <b>${esc(t.akcija)}</b>`:""}</div>`:""}
+    ${chips?`<div class="chips">${chips}</div>`:""}</div></div>
+    <div class="card-actions">
+      ${!task?`<button class="btn small" type="button" data-mail-task="${esc(m.k)}">＋ Zadatak</button><button class="btn small" type="button" data-mail-link="${esc(m.k)}">Poveži sa zadatkom</button>`:""}
+      <button class="btn small" type="button" data-mail-done="${esc(m.k)}">${t.handled?"Vrati":"Riješeno"}</button>
+      ${m.webLink?`<a class="btn small ghost" href="${esc(m.webLink)}" target="_blank" rel="noopener">Outlook ↗</a>`:""}
+      <select class="btn small" data-mail-cat="${esc(m.k)}" aria-label="Kategorija" style="width:auto">${["hitno","odgovoriti","info"].map(c=>`<option ${c===cat?"selected":""}>${c}</option>`).join("")}</select>
+    </div></div>`;
+}
+function renderMail(){
+  const body=$("mailBody");
+  if(S.mailState==="nomcp"){ body.innerHTML=`<div class="note">Pošta se čita preko tvog <b>Microsoft 365</b> konektora i radi kad je stranica otvorena u Claudeu (web ili mobilna aplikacija), prijavljen kao vlasnik. Zadaci i CRM rade i bez toga.</div>`+triageOnlyHtml(); return; }
+  if(S.mailState==="loading"){ body.innerHTML=`<div class="note">Učitavam poštu iz Outlooka…</div>`; return; }
+  let html="";
+  if(S.mailState==="err") html+=`<div class="note err">${mailErrNote(S.mailErr)}</div>`;
+  if(S.classifying) html+=`<div class="note">Claude procjenjuje šta je hitno…</div>`;
+  const by={hitno:[],odgovoriti:[],info:[],novo:[],rijeseno:[]};
+  S.emails.forEach(m=>{ const t=S.triage[m.k]; if(!t||!t.kategorija) by.novo.push(m); else if(t.handled) by.rijeseno.push(m); else by[t.kategorija].push(m); });
+  const sec=(title,arr,cls,fold)=>{ if(!arr.length) return ""; const inner=`<div class="group-title ${cls||""}">${title} <span class="n">${arr.length}</span></div>`; return fold?`<details class="fold"><summary>${inner}</summary><div class="list">${arr.map(mailCard).join("")}</div></details>`:`<div>${inner}<div class="list">${arr.map(mailCard).join("")}</div></div>`; };
+  html+=sec("Hitno",by.hitno,"urgent")+sec("Treba odgovoriti",by.odgovoriti,"warn")+sec("Neanalizirano",by.novo)+sec("Informativno",by.info,"",true)+sec("Riješeno",by.rijeseno,"",true);
+  if(S.mailState==="ok"&&!S.emails.length) html+=`<div class="note">Nema novih emailova u Inboxu.</div>`;
+  body.innerHTML=html;
+  const b=$("mailAllowBtn"); if(b) b.onclick=mailAllow;
+  $("mailMeta").textContent=(S.emails.length?by.hitno.length+" hitno · "+by.odgovoriti.length+" za odgovor":"")+(S.mailStoredAt?" · "+ago(S.mailStoredAt):"");
+  $("bMail").textContent=by.hitno.length||"";
+  $("mailReclass").disabled=!S.sample||S.classifying||!S.emails.length;
+}
+function triageOnlyHtml(){
+  const arr=Object.entries(S.triage).map(([k,v])=>({k,...v})).filter(v=>!v.handled&&v.kategorija!=="info").sort((a,b)=>String(b.received).localeCompare(String(a.received))).slice(0,25);
+  if(!arr.length) return "";
+  return `<div><div class="group-title">Zadnja analiza</div><div class="list">${arr.map(v=>`<div class="card ${v.kategorija==="hitno"?"stripe-urgent":"stripe-warn"}"><div class="title">${esc(v.subject)}</div><div class="sub">${esc(v.senderName||v.sender)} · ${esc(fmtTime(v.received))}</div><div class="sub" style="color:var(--ink)">${esc(v.razlog)}${v.akcija?" → <b>"+esc(v.akcija)+"</b>":""}</div>${v.webLink?`<div class="card-actions"><a class="btn small ghost" href="${esc(v.webLink)}" target="_blank" rel="noopener">Outlook ↗</a></div>`:""}</div>`).join("")}</div></div>`;
+}
+document.addEventListener("click",async e=>{
+  const b=e.target.closest("[data-mail-task],[data-mail-link],[data-mail-done]"); if(!b) return;
+  const k=b.dataset.mailTask||b.dataset.mailLink||b.dataset.mailDone; const m=S.emails.find(x=>x.k===k); const t=S.triage[k]||{};
+  if(b.dataset.mailTask){
+    if(!m) return; const id=uid("t"), now=new Date().toISOString();
+    const due=t.kategorija==="hitno"?todayIso():addDays(2);
+    const title=(t.akcija?t.akcija+": ":"Odgovoriti: ")+(m.subject||"").replace(/^(re|fw|fwd|aw):\s*/i,"");
+    await writeDoc("tasks/"+id,{title:title.slice(0,140),notes:(m.senderName||m.sender)+" – "+String(m.summary||"").replace(/\s+/g," ").slice(0,200),due,priority:t.kategorija==="hitno"?"visok":"srednji",done:false,source:"mail",leadId:t.leadId||"",createdAt:now,updatedAt:now});
+    await writeDoc("mailtriage/"+k,{...baseTriage(m,t),taskId:id});
+    toast("Zadatak napravljen i povezan s emailom");
+  } else if(b.dataset.mailLink){
+    const open=S.tasks.filter(x=>!x.done);
+    openModal(`<header><h3>Poveži email sa zadatkom</h3><button class="btn ghost" type="button" id="mClose">Zatvori</button></header><div class="body"><div class="sub">${esc(m?m.subject:"")}</div>${open.length?`<div class="list">${open.map(x=>`<button class="card" type="button" style="text-align:left;cursor:pointer" data-pick="${esc(x.id)}"><div class="title">${esc(x.title)}</div><div class="sub">${esc(x.due?fmtDate(x.due):"bez roka")}</div></button>`).join("")}</div>`:`<div class="note">Nema otvorenih zadataka.</div>`}</div>`);
+    $("mClose").onclick=closeModal;
+    $("modal").querySelectorAll("[data-pick]").forEach(p=>p.onclick=async()=>{ closeModal(); await writeDoc("mailtriage/"+k,{...baseTriage(m,t),taskId:p.dataset.pick}); toast("Povezano"); });
+  } else if(b.dataset.mailDone){
+    await writeDoc("mailtriage/"+k,{...baseTriage(m,t),handled:!t.handled});
+  }
+});
+document.addEventListener("change",async e=>{ const s=e.target.closest("[data-mail-cat]"); if(!s) return; const k=s.dataset.mailCat; const m=S.emails.find(x=>x.k===k); await writeDoc("mailtriage/"+k,{...baseTriage(m,S.triage[k]||{}),kategorija:s.value,metoda:"ručno"}); });
+function baseTriage(m,t){ return {msgId:(m&&m.id)||t.msgId||"",subject:(m&&m.subject)||t.subject||"",sender:(m&&m.sender)||t.sender||"",senderName:(m&&m.senderName)||t.senderName||"",received:(m&&m.receivedDateTime)||t.received||"",webLink:(m&&m.webLink)||t.webLink||"",kategorija:t.kategorija||"info",razlog:t.razlog||"",akcija:t.akcija||"",metoda:t.metoda||"",taskId:t.taskId||"",leadId:t.leadId||"",handled:!!t.handled,classifiedAt:t.classifiedAt||new Date().toISOString()}; }
+
+/* ---------- CRM ---------- */
+$("crmSearch").addEventListener("input",e=>{ S.crmQuery=e.target.value.toLowerCase(); renderCrm(); });
+$("crmPrio").addEventListener("change",e=>{ S.crmPrio=e.target.value; renderCrm(); });
+$("crmTabs").addEventListener("click",e=>{ const b=e.target.closest("[data-list]"); if(!b) return; S.crmList=b.dataset.list; renderCrm(); });
+function leadCard(l){
+  const p=l.Prioritet||""; const stripe=p==="Visok"?"stripe-urgent":p==="Srednji"?"stripe-warn":"stripe-muted";
+  const rc=l["Datum ponovnog kontakta"]?String(l["Datum ponovnog kontakta"]).slice(0,10):""; const late=rc&&rc<=todayIso();
+  return `<div class="card ${stripe}" style="cursor:pointer" data-open-lead="${esc(l.id)}" tabindex="0" role="button">
+    <div class="row"><div class="grow"><div class="title">${esc(l.Investitor||"(bez naziva)")}</div>
+    <div class="lead-meta"><span>${esc(l["Lokacija (grad/općina)"]||"")}</span><span>${esc(l["Tip objekta"]||"")}</span>${l["Vrijednost investicije"]&&l["Vrijednost investicije"]!=="Nepoznato"?`<span class="mono">${esc(l["Vrijednost investicije"])}</span>`:""}</div>
+    <div class="chips">${l["Status izgradnje"]?`<span class="chip plain">${esc(l["Status izgradnje"])}</span>`:""}${p?`<span class="chip ${p==="Visok"?"urgent":p==="Srednji"?"warn":"plain"}">${esc(p)}</span>`:""}${rc?`<span class="chip ${late?"urgent":"ok"}">kontakt ${esc(fmtDate(rc))}</span>`:""}${l["Status ponude"]?`<span class="chip">${esc(l["Status ponude"])}</span>`:""}</div>
+    ${l["Sljedeći korak"]?`<div class="sub" style="margin-top:5px">→ ${esc(String(l["Sljedeći korak"]).slice(0,140))}</div>`:""}
+    </div><span class="mono sub">#${esc(l.ID)}</span></div></div>`;
+}
+function renderCrm(){
+  const body=$("crmBody");
+  if(!S.db){ body.innerHTML=`<div class="note err">Baza nije dostupna. Otvori stranicu prijavljen na claude.ai.</div>`; return; }
+  if(!S.leadsReady) return;
+  const counts={}; LISTS.forEach(x=>counts[x]=S.leads.filter(l=>(l._list||"Tragovi")===x).length);
+  $("crmTabs").innerHTML=LISTS.map(x=>`<button class="tab ${S.crmList===x?"on":""}" type="button" role="tab" data-list="${x}">${x}<span class="mono">${counts[x]}</span></button>`).join("");
+  const prioRank={Visok:0,Srednji:1,Nizak:2};
+  let arr=S.leads.filter(l=>(l._list||"Tragovi")===S.crmList);
+  if(S.crmPrio) arr=arr.filter(l=>l.Prioritet===S.crmPrio);
+  if(S.crmQuery) arr=arr.filter(l=>[l.Investitor,l["Lokacija (grad/općina)"],l["Kontakt osoba"],l["Tip objekta"],l.Email,l.Direktor,l["Djelatnost investitora"]].join(" ").toLowerCase().includes(S.crmQuery));
+  arr.sort((a,b)=>(prioRank[a.Prioritet]??3)-(prioRank[b.Prioritet]??3)||String(a["Datum ponovnog kontakta"]||"9").localeCompare(String(b["Datum ponovnog kontakta"]||"9"))||(b.ID||0)-(a.ID||0));
+  body.innerHTML=arr.length?`<div class="list">${arr.map(leadCard).join("")}</div>`:`<div class="note">${S.leads.length?"Nema tragova za ovaj filter.":"Još nema tragova u bazi."}</div>`;
+  const hi=S.leads.filter(l=>l._list!=="Staro"&&l.Prioritet==="Visok").length;
+  $("crmMeta").textContent=S.leads.length+" ukupno · "+hi+" visok prioritet";
+  const due=S.leads.filter(l=>l._list!=="Staro"&&l["Datum ponovnog kontakta"]&&String(l["Datum ponovnog kontakta"]).slice(0,10)<=todayIso()).length;
+  $("bCrm").textContent=due||"";
+}
+document.addEventListener("keydown",e=>{ if((e.key==="Enter"||e.key===" ")&&e.target.matches(".card[data-open-lead]")){ e.preventDefault(); openLeadModal(leadById(e.target.dataset.openLead)); } });
+
+function fieldInput(col,val){
+  const id="f_"+btoa(unescape(encodeURIComponent(col))).replace(/[^a-z0-9]/gi,"");
+  let inner;
+  if(col==="Status izgradnje") inner=`<select id="${id}" data-col="${esc(col)}"><option value=""></option>${STATUS_IZG.map(s=>`<option ${s===val?"selected":""}>${s}</option>`).join("")}${val&&!STATUS_IZG.includes(val)?`<option selected>${esc(val)}</option>`:""}</select>`;
+  else if(col==="Prioritet") inner=`<select id="${id}" data-col="${esc(col)}"><option value=""></option>${PRIO.map(s=>`<option ${s===val?"selected":""}>${s}</option>`).join("")}</select>`;
+  else if(col==="Status ponude") inner=`<select id="${id}" data-col="${esc(col)}"><option value=""></option>${STATUS_PONUDE.map(s=>`<option ${s===val?"selected":""}>${s}</option>`).join("")}</select>`;
+  else if(DATE_COLS.has(col)) inner=`<input type="date" id="${id}" data-col="${esc(col)}" value="${esc(String(val||"").slice(0,10))}">`;
+  else if(LONG_COLS.has(col)) inner=`<textarea id="${id}" data-col="${esc(col)}" rows="${col==="Poznate informacije o projektu"||col==="Komentar nakon kontakta"||col==="Izvori informacija"?4:2}">${esc(val??"")}</textarea>`;
+  else inner=`<input type="text" id="${id}" data-col="${esc(col)}" value="${esc(val??"")}">`;
+  let extra="";
+  if(col==="Telefon"&&val) extra=` <a class="linkish" href="tel:${esc(String(val).split(/[;,]/)[0].replace(/[^\d+]/g,""))}">nazovi</a>`;
+  if(col==="Email"&&val) extra=` <a class="linkish" href="mailto:${esc(String(val).split(/[;,\s]/)[0])}">piši</a>`;
+  if(col==="Web stranica"&&val){ const u=String(val).split(/[\s/]+/).find(x=>/\./.test(x)); if(u) extra=` <a class="linkish" href="https://${esc(u.replace(/^https?:\/\//,""))}" target="_blank" rel="noopener">otvori</a>`; }
+  return `<label class="${LONG_COLS.has(col)?"wide":""}" for="${id}"><span>${esc(col)}${extra}</span>${inner}</label>`;
+}
+function openLeadModal(l){
+  const isNew=!l; if(isNew){ const max=S.leads.reduce((m,x)=>Math.max(m,Number(x.ID)||0),0); l={id:"L"+(max+1),ID:max+1,_list:"Tragovi","Datum unosa":todayIso(),Prioritet:"Srednji"}; }
+  const list=l._list||"Tragovi";
+  const groups=LEAD_GROUPS.concat(EXTRA_COLS[list].length?[[list==="Aktuelno"?"Ponuda":"Arhiva",EXTRA_COLS[list]]]:[]);
+  const linkedTasks=S.tasks.filter(t=>t.leadId===l.id); const linkedMails=Object.entries(S.triage).filter(([k,v])=>v.leadId===l.id);
+  openModal(`<header><h3>${isNew?"Novi trag":esc(l.Investitor)}</h3><span class="mono sub">#${esc(l.ID)} · ${esc(list)}</span><button class="btn ghost" type="button" id="mClose">Zatvori</button></header>
+  <div class="body">
+    ${!isNew?`<div class="fs" style="grid-template-columns:1fr auto;align-items:end"><label><span>Brza bilješka nakon kontakta</span><input type="text" id="quickNote" placeholder="npr. Razgovarao s direktorom, poslati reference…"></label><button class="btn" type="button" id="quickNoteBtn">Dodaj</button></div>`:""}
+    ${groups.map(([g,cols])=>`<fieldset class="fs"><legend>${esc(g)}</legend>${cols.map(c=>fieldInput(c,l[c])).join("")}</fieldset>`).join("")}
+    ${linkedTasks.length||linkedMails.length?`<div><div class="group-title">Povezano</div><div class="chips">${linkedTasks.map(t=>`<button class="chip" type="button" data-goto-task="${esc(t.id)}">☐ ${esc(t.title.slice(0,40))}</button>`).join("")}${linkedMails.map(([k,v])=>`<button class="chip" type="button" data-goto-mail="${esc(k)}">✉ ${esc(String(v.subject).slice(0,40))}</button>`).join("")}</div></div>`:""}
+  </div>
+  <footer>
+    ${!isNew?`<select id="moveTo" class="btn" style="width:auto;margin-right:auto" aria-label="Premjesti u listu"><option value="">Premjesti u…</option>${LISTS.filter(x=>x!==list).map(x=>`<option>${x}</option>`).join("")}</select><button class="btn" type="button" id="leadTaskBtn">→ Zadatak</button>`:""}
+    <button class="btn" type="button" id="mCancel">Odustani</button><button class="btn primary" type="button" id="leadSave">Spremi</button>
+  </footer>`);
+  $("mClose").onclick=$("mCancel").onclick=closeModal;
+  $("modal").querySelectorAll("[data-goto-task],[data-goto-mail]").forEach(b=>b.addEventListener("click",closeModal));
+  const collect=()=>{ const d={}; $("modal").querySelectorAll("[data-col]").forEach(f=>{ const c=f.dataset.col; const v=f.value; if(String(l[c]??"")!==v) d[c]=v; }); return d; };
+  const save=async(extra)=>{ const d={...collect(),...(extra||{})}; if(isNew){ if(!d.Investitor&&!l.Investitor){ toast("Upiši investitora."); return false; } const doc={...l,...d,_origin:"app",updatedAt:new Date().toISOString()}; delete doc.id; return await writeDoc("leads/"+l.id,doc); } if(!Object.keys(d).length) return true; d.updatedAt=new Date().toISOString(); return await writeDoc("leads/"+l.id,d,true); };
+  $("leadSave").onclick=async()=>{ if(await save()){ closeModal(); toast(isNew?"Trag dodan":"Trag spremljen"); } };
+  if(!isNew){
+    $("quickNoteBtn").onclick=async()=>{ const n=$("quickNote").value.trim(); if(!n) return; const d=new Date(); const line=pad(d.getDate())+"."+pad(d.getMonth()+1)+"."+d.getFullYear()+" – "+n; const f=$("modal").querySelector('[data-col="Komentar nakon kontakta"]'); f.value=line+(f.value?"\n"+f.value:""); $("quickNote").value=""; await save(); toast("Bilješka dodana"); };
+    $("moveTo").onchange=async e=>{ const to=e.target.value; if(!to) return; closeModal(); await save({_list:to,"Datum prebacivanja":todayIso()}); S.crmList=to; renderCrm(); toast("Premješteno u "+to); };
+    $("leadTaskBtn").onclick=async()=>{ await save(); const id=uid("t"), now=new Date().toISOString(); await writeDoc("tasks/"+id,{title:"Kontaktirati: "+l.Investitor,notes:l["Sljedeći korak"]||"",due:String($("modal").querySelector('[data-col="Datum ponovnog kontakta"]').value||addDays(1)),priority:(l.Prioritet||"Srednji").toLowerCase(),done:false,source:"crm",leadId:l.id,createdAt:now,updatedAt:now}); closeModal(); toast("Zadatak napravljen"); };
+  }
+}
+$("crmNew").onclick=()=>openLeadModal(null);
+$("crmExport").onclick=async()=>{
+  if(!window.XLSX){ toast("Excel biblioteka nije učitana."); return; }
+  const wb=XLSX.utils.book_new();
+  LISTS.forEach(name=>{ const cols=BASE_COLS.concat(EXTRA_COLS[name]); const rows=S.leads.filter(l=>(l._list||"Tragovi")===name).sort((a,b)=>(a.ID||0)-(b.ID||0)).map(l=>cols.map(c=>l[c]??"")); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([cols,...rows]),name); });
+  const buf=XLSX.write(wb,{bookType:"xlsx",type:"array"});
+  const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  if(S.downloads){ try{ await S.downloads.save({filename:"Prodajni_tragovi_"+todayIso()+".xlsx",data:blob}); }catch(e){ toast("Preuzimanje nije potvrđeno."); } }
+  else toast("Preuzimanje nije dostupno u ovom prikazu.");
+};
+
+/* ---------- start ---------- */
+(async function init(){
+  if(!window.claude||!window.claude.use){ setStatus("err","Otvori stranicu na claude.ai"); renderTodo(); renderCrm(); S.mailState="nomcp"; renderMail(); return; }
+  const [db,mcp,sample,downloads,user]=await Promise.all(["db","mcp","sample","downloads","user"].map(n=>window.claude.use(n).catch(()=>null)));
+  Object.assign(S,{db,mcp,sample,downloads});
+  if(!sample) $("mailReclass").style.display="none";
+  if(!downloads) $("crmExport").style.display="none";
+  if(user&&typeof user.can==="function"){ try{ const w=await user.can("data.write"); if(w===false){ S.canWrite=false; $("addTask").style.display="none"; $("crmNew").style.display="none"; } }catch(_){} }
+  if(!db){ setStatus("err","Baza nije dostupna – prijavi se na claude.ai"); renderTodo(); renderCrm(); }
+  else subscribe();
+  startMail();
+  setInterval(()=>{ renderTodo(); if(S.mailStoredAt) renderMailMeta(); },60*1000);
+})();
+function renderMailMeta(){ const m=$("mailMeta"); if(m&&S.mailStoredAt) m.textContent=m.textContent.replace(/ · prije .*| · upravo$/,"")+" · "+ago(S.mailStoredAt); }
+</script>
+</body>
+</html>
